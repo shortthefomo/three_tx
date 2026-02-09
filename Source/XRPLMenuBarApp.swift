@@ -225,16 +225,69 @@ class XRPLDataService: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var selectedNetwork: XRPLNetwork = .xrpl
-    let client = XRPLClient()
     private let ledgerCount = 100 // Reduced for faster loading
     
-    func fetchResultCodes() async -> XRPLData? {
+    // Cache data for both networks
+    private var cachedData: [XRPLNetwork: XRPLData] = [:]
+    private var refreshTimer: Timer?
+    
+    init() {
+        // Timer will be started by the ContentView
+    }
+    
+    deinit {
+        refreshTimer?.invalidate()
+    }
+    
+    func getCurrentData() -> XRPLData? {
+        return cachedData[selectedNetwork]
+    }
+    
+    func startAutoRefresh() {
+        // Auto-refresh every 5 minutes
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.fetchAllNetworks()
+            }
+        }
+    }
+    
+    func fetchAllNetworks() async -> XRPLData? {
         isLoading = true
         error = nil
         
+        // Fetch both networks concurrently with separate clients
+        async let xrplTask = fetchResultCodes(for: .xrpl, using: XRPLClient())
+        async let xahauTask = fetchResultCodes(for: .xahau, using: XRPLClient())
+        
+        let (xrplData, xahauData) = await (xrplTask, xahauTask)
+        
+        // Update cached data
+        if let xrplData = xrplData {
+            cachedData[.xrpl] = xrplData
+        }
+        if let xahauData = xahauData {
+            cachedData[.xahau] = xahauData
+        }
+        
+        isLoading = false
+        return cachedData[selectedNetwork]
+    }
+    
+    @available(*, deprecated, message: "Use fetchAllNetworks() instead")
+    func fetchResultCodes() async -> XRPLData? {
+        return await fetchAllNetworks()
+    }
+    
+    private func fetchResultCodes(for network: XRPLNetwork, using client: XRPLClient) async -> XRPLData? {
         do {
-            try await client.connect(to: selectedNetwork)
-            defer { client.disconnect() }
+            print("🔄 Starting concurrent fetch for \(network.shortName)")
+            try await client.connect(to: network)
+            defer { 
+                client.disconnect()
+                print("✅ Completed fetch for \(network.shortName)")
+            }
             
             // Get latest ledger
             let ledgerResponse = try await client.request([
@@ -252,28 +305,28 @@ class XRPLDataService: ObservableObject {
             
             var resultCounts: [String: Int] = [:]
             
-            // Fetch ledgers
+            // Fetch ledgers sequentially to avoid complex concurrency issues
             for ledgerIndex in stride(from: latestLedger, through: startLedger, by: -1) {
-                let transactions = try await fetchLedgerTransactions(ledgerIndex: ledgerIndex)
-                
-                for tx in transactions {
-                    let resultCode = extractResultCode(from: tx)
-                    resultCounts[resultCode, default: 0] += 1
+                do {
+                    let transactions = try await fetchLedgerTransactions(ledgerIndex: ledgerIndex, using: client)
+                    for tx in transactions {
+                        let resultCode = extractResultCode(from: tx)
+                        resultCounts[resultCode, default: 0] += 1
+                    }
+                } catch {
+                    print("⚠️ Failed to fetch ledger \(ledgerIndex) for \(network.shortName): \(error)")
                 }
             }
             
-            let data = processResultCounts(resultCounts, ledgerRange: ledgerRange)
-            isLoading = false
-            return data
+            return processResultCounts(resultCounts, ledgerRange: ledgerRange, network: network)
             
         } catch {
-            self.error = error.localizedDescription
-            isLoading = false
+            print("❌ Error fetching \(network.shortName) result codes: \(error)")
             return nil
         }
     }
     
-    private func fetchLedgerTransactions(ledgerIndex: Int) async throws -> [[String: Any]] {
+    private func fetchLedgerTransactions(ledgerIndex: Int, using client: XRPLClient) async throws -> [[String: Any]] {
         let response = try await client.request([
             "command": "ledger",
             "ledger_index": ledgerIndex,
@@ -317,7 +370,7 @@ class XRPLDataService: ObservableObject {
         return "Unknown"
     }
     
-    private func processResultCounts(_ counts: [String: Int], ledgerRange: String) -> XRPLData {
+    private func processResultCounts(_ counts: [String: Int], ledgerRange: String, network: XRPLNetwork) -> XRPLData {
         let entries = counts.sorted { $0.value > $1.value }
         let total = entries.reduce(0) { $0 + $1.value }
         
@@ -339,7 +392,7 @@ class XRPLDataService: ObservableObject {
             mostCommon: mostCommon,
             averagePerType: averagePerType,
             ledgerRange: ledgerRange,
-            networkName: selectedNetwork.rawValue
+            networkName: network.rawValue
         )
     }
 }
@@ -397,8 +450,14 @@ struct ContentView: View {
                     .disabled(dataService.isLoading)
                     .onChange(of: dataService.selectedNetwork) { oldValue, newValue in
                         if oldValue != newValue {
-                            Task {
-                                await refreshData()
+                            // Update display with cached data immediately
+                            updateDisplayData()
+                            
+                            // Refresh if no cached data exists for the new network
+                            if dataService.getCurrentData() == nil {
+                                Task {
+                                    await refreshData()
+                                }
                             }
                         }
                     }
@@ -546,21 +605,25 @@ struct ContentView: View {
         .padding()
         .frame(width: 350, height: 450)
         .onAppear {
+            updateDisplayData()
+            
             Task {
                 await refreshData()
             }
             
-            // Auto-refresh every 5 minutes
-            Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
-                Task {
-                    await refreshData()
-                }
-            }
+            // Start auto-refresh timer
+            dataService.startAutoRefresh()
         }
     }
     
+    @MainActor
+    private func updateDisplayData() {
+        data = dataService.getCurrentData()
+    }
+    
+    @MainActor
     private func refreshData() async {
-        if let newData = await dataService.fetchResultCodes() {
+        if let newData = await dataService.fetchAllNetworks() {
             data = newData
             lastRefresh = Date()
         }
