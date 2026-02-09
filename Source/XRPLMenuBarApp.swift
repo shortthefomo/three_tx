@@ -226,7 +226,7 @@ class XRPLDataService: ObservableObject {
     @Published var error: String?
     @Published var selectedNetwork: XRPLNetwork = .xrpl
     let client = XRPLClient()
-    private let ledgerCount = 50 // Reduced for faster loading
+    private let ledgerCount = 100 // Reduced for faster loading
     
     func fetchResultCodes() async -> XRPLData? {
         isLoading = true
