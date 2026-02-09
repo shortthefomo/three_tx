@@ -1,10 +1,12 @@
-# XRPL Result Codes Menu Bar App
+# XRPL & Xahau Result Codes Menu Bar App
 
-A native macOS menu bar application that displays real-time XRPL (XRP Ledger) transaction result codes and statistics.
+A native macOS menu bar application that displays real-time XRPL (XRP Ledger) and Xahau Network transaction result codes and statistics.
 
 ## 📊 Features
 
-- **Real-time XRPL data** - Connects directly to XRPL network
+- **Dual network support** - Switch between XRPL mainnet and Xahau network
+- **Real-time data** - Connects directly to both XRPL and Xahau networks
+- **Network toggle** - Easy switching between networks with segmented control
 - **Menu bar integration** - Always accessible from your menu bar
 - **Color-coded visualizations** - Progress bars for each result code type
 - **Live statistics** - Transaction counts, percentages, and trends
@@ -13,11 +15,12 @@ A native macOS menu bar application that displays real-time XRPL (XRP Ledger) tr
 
 ## 📱 What You'll See
 
+- **Network selector** - Toggle between XRPL mainnet and Xahau network
 - **tesSUCCESS** - Successful transactions (usually majority)
 - **tecPATH_DRY** - Payment path issues
 - **tecUNFUNDED_PAYMENT** - Insufficient funds
 - **tecNO_DST** - Destination account doesn't exist
-- And other XRPL result codes with their frequencies
+- And other result codes with their frequencies on both networks
 
 ## 🚀 Installation
 
@@ -47,29 +50,39 @@ A native macOS menu bar application that displays real-time XRPL (XRP Ledger) tr
 ## 💻 Usage
 
 1. **Click the chart icon** in your menu bar
-2. **View live data** - Result codes with progress bars and statistics
-3. **Manual refresh** - Click "Refresh" button for instant updates
-4. **Auto-updates** - Data refreshes automatically every 5 minutes
+2. **Select network** - Choose between XRPL or Xahau using the toggle
+3. **View live data** - Result codes with progress bars and statistics
+4. **Switch networks** - Toggle automatically refreshes data for selected network
+5. **Manual refresh** - Click "Refresh" button for instant updates
+6. **Auto-updates** - Data refreshes automatically every 5 minutes
 
 ## 🔧 System Requirements
 
 - **macOS 14.0** or later
-- **Internet connection** for XRPL network access
+- **Internet connection** for XRPL and Xahau network access
 - **Menu bar access** (the app runs in the background)
 
 ## 🌐 Network
 
-The app connects directly to the XRPL network to fetch:
-- Latest ledger transactions
-- Transaction result codes and metadata  
-- Real-time statistics and trends
+The app connects directly to both networks:
 
-No external APIs or services required beyond the XRPL network itself.
+**XRPL Mainnet:**
+- Latest XRPL ledger transactions
+- Transaction result codes and metadata  
+- Real-time XRPL statistics and trends
+
+**Xahau Network:**
+- Latest Xahau ledger transactions
+- Xahau-specific result codes and metadata
+- Real-time Xahau network statistics
+
+No external APIs or services required beyond the native network connections.
 
 ## 🔒 Privacy & Security
 
 - **No data collection** - All data stays on your device
-- **Direct XRPL connection** - No third-party servers involved
+- **Direct network connections** - Connects to XRPL and Xahau networks directly
+- **No third-party servers** - No intermediary services involved
 - **Open source approach** - Transparent functionality
 - **Minimal permissions** - Only needs network access
 
@@ -82,8 +95,9 @@ No external APIs or services required beyond the XRPL network itself.
 
 ### No Data Showing  
 - Check internet connection
+- Try switching between XRPL and Xahau networks using the toggle
 - Click "Refresh" to manually update
-- Wait 30 seconds for initial connection to XRPL network
+- Wait 30 seconds for initial connection to selected network
 
 ### Menu Bar Icon Missing
 - The app runs in background - look for chart icon in menu bar
@@ -92,11 +106,11 @@ No external APIs or services required beyond the XRPL network itself.
 
 ## 🗑️ Uninstall
 
-Simply delete the `XRPL Result Codes` app from your Applications folder.
+Simply delete the `XRPL & Xahau Result Codes` app from your Applications folder.
 
 ---
 
 **Version:** 1.0  
 **Compatible with:** macOS 14.0+  
-**Network:** Connects to XRPL mainnet  
+**Networks:** XRPL Mainnet & Xahau Network  
 **Update Frequency:** Every 5 minutes
