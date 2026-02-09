@@ -6,16 +6,22 @@ A native macOS menu bar application that displays real-time XRPL (XRP Ledger) an
 
 - **Dual network support** - Switch between XRPL mainnet and Xahau network
 - **Real-time data** - Connects directly to both XRPL and Xahau networks
+- **Filters panel** - Collapsible controls to keep the menu clean
 - **Network toggle** - Easy switching between networks with segmented control
+- **View toggle** - Switch between Result Codes and Tx Types
+- **Data mode toggle** - Live (current ledger) or Last 100 ledgers
 - **Menu bar integration** - Always accessible from your menu bar
 - **Color-coded visualizations** - Progress bars for each result code type
-- **Live statistics** - Transaction counts, percentages, and trends
-- **Auto-refresh** - Updates every 5 minutes automatically
+- **Live statistics** - Transaction counts, percentages, and ledger info
+- **Auto-refresh** - 15s in Live mode, 5m in Last 100 mode
 - **No dependencies** - Self-contained native macOS application
 
 ## 📱 What You'll See
 
+- **Filters panel** - Expand to show controls
 - **Network selector** - Toggle between XRPL mainnet and Xahau network
+- **View selector** - Result Codes or Tx Types
+- **Data selector** - Live (current ledger) or Last 100 ledgers
 - **tesSUCCESS** - Successful transactions (usually majority)
 - **tecPATH_DRY** - Payment path issues
 - **tecUNFUNDED_PAYMENT** - Insufficient funds
@@ -50,11 +56,12 @@ A native macOS menu bar application that displays real-time XRPL (XRP Ledger) an
 ## 💻 Usage
 
 1. **Click the chart icon** in your menu bar
-2. **Select network** - Choose between XRPL or Xahau using the toggle
-3. **View live data** - Result codes with progress bars and statistics
-4. **Switch networks** - Toggle automatically refreshes data for selected network
-5. **Manual refresh** - Click "Refresh" button for instant updates
-6. **Auto-updates** - Data refreshes automatically every 5 minutes
+2. **Open Filters** - Click the Filters disclosure
+3. **Select network** - Choose between XRPL or Xahau
+4. **Choose view** - Result Codes or Tx Types
+5. **Choose data mode** - Live or Last 100 ledgers
+6. **Manual refresh** - Click "Refresh" button for instant updates
+7. **Auto-updates** - 15 seconds in Live, 5 minutes in Last 100
 
 ## 🔧 System Requirements
 
@@ -70,11 +77,15 @@ The app connects directly to both networks:
 - Latest XRPL ledger transactions
 - Transaction result codes and metadata  
 - Real-time XRPL statistics and trends
+- Live mode shows the current ledger only
+- Last 100 mode aggregates recent ledgers
 
 **Xahau Network:**
 - Latest Xahau ledger transactions
 - Xahau-specific result codes and metadata
 - Real-time Xahau network statistics
+- Live mode shows the current ledger only
+- Last 100 mode aggregates recent ledgers
 
 No external APIs or services required beyond the native network connections.
 
@@ -113,4 +124,4 @@ Simply delete the `XRPL & Xahau Result Codes` app from your Applications folder.
 **Version:** 1.0  
 **Compatible with:** macOS 14.0+  
 **Networks:** XRPL Mainnet & Xahau Network  
-**Update Frequency:** Every 5 minutes
+**Update Frequency:** 15s (Live) or 5m (Last 100)

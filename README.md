@@ -10,11 +10,14 @@ A native macOS menu bar application that displays real-time XRPL (XRP Ledger) an
 
 - **Dual network support** - Switch between XRPL mainnet and Xahau network
 - **Real-time connectivity** - Direct WebSocket connections to both networks
+- **Filters panel** - Collapsible controls to keep the menu clean
 - **Network toggle** - Easy switching with segmented control interface
+- **View toggle** - Switch between Result Codes and Transaction Types
+- **Data mode toggle** - Live (current ledger) or Last 100 ledgers
 - **Menu bar integration** - Always accessible from your menu bar
 - **Color-coded visualizations** - Progress bars for each result code type
-- **Live statistics** - Transaction counts, percentages, and ledger ranges
-- **Auto-refresh** - Updates every 5 minutes automatically
+- **Live statistics** - Transaction counts, percentages, and ledger info
+- **Auto-refresh** - 15s in Live mode, 5m in Last 100 mode
 - **Native Swift app** - Optimized for macOS performance
 
 ## 🏗️ Project Structure
@@ -87,11 +90,12 @@ open Build/XRPLResultCodes.app
 ## 📱 Usage
 
 1. **Launch** the app (look for chart icon in menu bar)
-2. **Select network** - Choose between XRPL or Xahau using the toggle
-3. **Click icon** to view result codes for selected network
-4. **Switch networks** - Toggle automatically refreshes data
-5. **Refresh** manually or wait for auto-refresh
-6. **View statistics** including totals, percentages, and trends
+2. **Open Filters** - Click the Filters disclosure to show controls
+3. **Select network** - Choose between XRPL or Xahau
+4. **Choose view** - Result Codes or Tx Types
+5. **Choose data mode** - Live or Last 100 ledgers
+6. **Refresh** manually or wait for auto-refresh
+7. **View statistics** including totals, percentages, and ledger info
 
 ### Common Result Codes
 
@@ -132,15 +136,15 @@ The app connects directly to both networks:
 
 **XRPL Mainnet:**
 - **Endpoint:** Three-dev XRPL node
-- **Data source:** Last 50 XRPL ledgers (configurable)
+- **Data source:** Live ledger or last 100 ledgers (configurable)
 - **Result codes:** Standard XRPL transaction results
 
 **Xahau Network:**
 - **Endpoint:** Three-dev Xahau node
-- **Data source:** Last 50 Xahau ledgers (configurable)
+- **Data source:** Live ledger or last 100 ledgers (configurable)
 - **Result codes:** Xahau-specific transaction results
 
-- **Update frequency:** Every 5 minutes for selected network
+- **Update frequency:** 15 seconds (Live) or 5 minutes (Last 100)
 - **Fallback configuration:** Can be modified in source code
 
 ## 🔒 Privacy & Security

@@ -53,12 +53,44 @@ struct ResultCodeData: Codable {
 
 struct XRPLData: Codable {
     let resultCodes: [ResultCodeData]
+    let transactionTypes: [ResultCodeData]
     let totalTransactions: Int
     let lastUpdated: String
-    let mostCommon: String?
-    let averagePerType: Double
+    let mostCommonResultCode: String?
+    let mostCommonTransactionType: String?
+    let averageResultCodes: Double
+    let averageTransactionTypes: Double
+    let latestLedger: Int
     let ledgerRange: String
     let networkName: String
+}
+
+enum DisplayMode: String, CaseIterable {
+    case resultCodes = "Result Codes"
+    case transactionTypes = "Tx Types"
+}
+
+enum DataMode: String, CaseIterable {
+    case live = "Live"
+    case historical100 = "Last 100"
+
+    var ledgerCount: Int {
+        switch self {
+        case .live:
+            return 1
+        case .historical100:
+            return 100
+        }
+    }
+
+    var refreshInterval: TimeInterval {
+        switch self {
+        case .live:
+            return 15
+        case .historical100:
+            return 300
+        }
+    }
 }
 
 enum XRPLNetwork: String, CaseIterable {
@@ -91,6 +123,7 @@ class XRPLClient: NSObject, ObservableObject {
     private var isConnected = false
     private var requestId = 0
     private var pendingRequests: [Int: (Result<[String: Any], Error>) -> Void] = [:]
+    var onLedgerClosed: ((Int) -> Void)?
     
     override init() {
         super.init()
@@ -145,18 +178,29 @@ class XRPLClient: NSObject, ObservableObject {
     
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = json["id"] as? Int,
-              let completion = pendingRequests[id] else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
-        
-        pendingRequests.removeValue(forKey: id)
-        
-        if let error = json["error"] as? [String: Any] {
-            completion(.failure(XRPLError.serverError(error["error_message"] as? String ?? "Unknown error")))
-        } else {
-            completion(.success(json))
+
+        if let id = json["id"] as? Int,
+           let completion = pendingRequests[id] {
+            pendingRequests.removeValue(forKey: id)
+
+            if let error = json["error"] as? [String: Any] {
+                completion(.failure(XRPLError.serverError(error["error_message"] as? String ?? "Unknown error")))
+            } else {
+                completion(.success(json))
+            }
+            return
+        }
+
+        if let type = json["type"] as? String, type == "ledgerClosed" {
+            if let ledgerIndex = json["ledger_index"] as? Int {
+                onLedgerClosed?(ledgerIndex)
+            } else if let ledgerString = json["ledger_index"] as? String,
+                      let ledgerIndex = Int(ledgerString) {
+                onLedgerClosed?(ledgerIndex)
+            }
         }
     }
     
@@ -184,6 +228,13 @@ class XRPLClient: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    func subscribeToLedgerClosed() async throws {
+        _ = try await request([
+            "command": "subscribe",
+            "streams": ["ledger"]
+        ])
     }
 }
 
@@ -225,12 +276,13 @@ class XRPLDataService: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var selectedNetwork: XRPLNetwork = .xrpl
+    @Published var dataMode: DataMode = .historical100
     @Published var lastDataUpdate = Date() // Trigger UI updates
-    private let ledgerCount = 100 // Reduced for faster loading
     
     // Cache data for both networks
     private var cachedData: [XRPLNetwork: XRPLData] = [:]
     private var refreshTimer: Timer?
+    private var liveClients: [XRPLNetwork: XRPLClient] = [:]
     
     init() {
         // Timer will be started by the ContentView
@@ -238,6 +290,9 @@ class XRPLDataService: ObservableObject {
     
     deinit {
         refreshTimer?.invalidate()
+        Task { @MainActor in
+            self.stopLiveListeners()
+        }
     }
     
     func getCurrentData() -> XRPLData? {
@@ -245,12 +300,58 @@ class XRPLDataService: ObservableObject {
     }
     
     func startAutoRefresh() {
-        // Auto-refresh every 5 minutes
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+
+        if dataMode == .live {
+            stopLiveListeners()
+            Task { @MainActor in
+                await startLiveListeners()
+            }
+            return
+        }
+
+        stopLiveListeners()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: dataMode.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.fetchAllNetworks()
             }
+        }
+    }
+
+    private func startLiveListeners() async {
+        for network in XRPLNetwork.allCases {
+            let client = XRPLClient()
+            liveClients[network] = client
+
+            client.onLedgerClosed = { [weak self] _ in
+                Task { @MainActor in
+                    await self?.refreshLiveData(for: network)
+                }
+            }
+
+            do {
+                try await client.connect(to: network)
+                try await client.subscribeToLedgerClosed()
+            } catch {
+                print("❌ Live subscribe failed for \(network.shortName): \(error)")
+            }
+        }
+    }
+
+    private func stopLiveListeners() {
+        for (_, client) in liveClients {
+            client.disconnect()
+        }
+        liveClients.removeAll()
+    }
+
+    private func refreshLiveData(for network: XRPLNetwork) async {
+        guard dataMode == .live else { return }
+
+        let client = XRPLClient()
+        if let data = await fetchResultCodes(for: network, using: client) {
+            cachedData[network] = data
+            lastDataUpdate = Date()
         }
     }
     
@@ -303,25 +404,36 @@ class XRPLDataService: ObservableObject {
                 throw XRPLError.invalidResponse
             }
             
-            let startLedger = max(latestLedger - ledgerCount + 1, 1)
+            let startLedger = max(latestLedger - dataMode.ledgerCount + 1, 1)
             let ledgerRange = "\(startLedger) to \(latestLedger)"
             
             var resultCounts: [String: Int] = [:]
+            var transactionTypeCounts: [String: Int] = [:]
+            var totalTransactions = 0
             
             // Fetch ledgers sequentially to avoid complex concurrency issues
             for ledgerIndex in stride(from: latestLedger, through: startLedger, by: -1) {
                 do {
                     let transactions = try await fetchLedgerTransactions(ledgerIndex: ledgerIndex, using: client)
                     for tx in transactions {
+                        totalTransactions += 1
                         let resultCode = extractResultCode(from: tx)
                         resultCounts[resultCode, default: 0] += 1
+
+                        let transactionType = extractTransactionType(from: tx)
+                        transactionTypeCounts[transactionType, default: 0] += 1
                     }
                 } catch {
                     print("⚠️ Failed to fetch ledger \(ledgerIndex) for \(network.shortName): \(error)")
                 }
             }
             
-            return processResultCounts(resultCounts, ledgerRange: ledgerRange, network: network)
+            return processResultCounts(resultCounts,
+                                       transactionTypeCounts: transactionTypeCounts,
+                                       totalTransactions: totalTransactions,
+                                       latestLedger: latestLedger,
+                                       ledgerRange: ledgerRange,
+                                       network: network)
             
         } catch {
             print("❌ Error fetching \(network.shortName) result codes: \(error)")
@@ -372,28 +484,60 @@ class XRPLDataService: ObservableObject {
         
         return "Unknown"
     }
+
+    private func extractTransactionType(from tx: [String: Any]) -> String {
+        if let type = tx["TransactionType"] as? String {
+            return type
+        }
+
+        if let txJson = tx["tx"] as? [String: Any],
+           let type = txJson["TransactionType"] as? String {
+            return type
+        }
+
+        return "Unknown"
+    }
     
-    private func processResultCounts(_ counts: [String: Int], ledgerRange: String, network: XRPLNetwork) -> XRPLData {
-        let entries = counts.sorted { $0.value > $1.value }
-        let total = entries.reduce(0) { $0 + $1.value }
-        
-        let resultCodes = entries.map { (type, count) in
+    private func processResultCounts(_ counts: [String: Int],
+                                     transactionTypeCounts: [String: Int],
+                                     totalTransactions: Int,
+                                     latestLedger: Int,
+                                     ledgerRange: String,
+                                     network: XRPLNetwork) -> XRPLData {
+        let resultEntries = counts.sorted { $0.value > $1.value }
+        let typeEntries = transactionTypeCounts.sorted { $0.value > $1.value }
+
+        let resultCodes = resultEntries.map { (type, count) in
             ResultCodeData(
                 type: type,
                 count: count,
-                share: total > 0 ? Double(count) / Double(total) * 100 : 0
+                share: totalTransactions > 0 ? Double(count) / Double(totalTransactions) * 100 : 0
             )
         }
-        
-        let mostCommon = entries.first?.key
-        let averagePerType = entries.isEmpty ? 0 : Double(total) / Double(entries.count)
-        
+
+        let transactionTypes = typeEntries.map { (type, count) in
+            ResultCodeData(
+                type: type,
+                count: count,
+                share: totalTransactions > 0 ? Double(count) / Double(totalTransactions) * 100 : 0
+            )
+        }
+
+        let mostCommonResultCode = resultEntries.first?.key
+        let mostCommonTransactionType = typeEntries.first?.key
+        let averageResultCodes = resultEntries.isEmpty ? 0 : Double(totalTransactions) / Double(resultEntries.count)
+        let averageTransactionTypes = typeEntries.isEmpty ? 0 : Double(totalTransactions) / Double(typeEntries.count)
+
         return XRPLData(
             resultCodes: resultCodes,
-            totalTransactions: total,
+            transactionTypes: transactionTypes,
+            totalTransactions: totalTransactions,
             lastUpdated: ISO8601DateFormatter().string(from: Date()),
-            mostCommon: mostCommon,
-            averagePerType: averagePerType,
+            mostCommonResultCode: mostCommonResultCode,
+            mostCommonTransactionType: mostCommonTransactionType,
+            averageResultCodes: averageResultCodes,
+            averageTransactionTypes: averageTransactionTypes,
+            latestLedger: latestLedger,
             ledgerRange: ledgerRange,
             networkName: network.rawValue
         )
@@ -404,15 +548,74 @@ struct ContentView: View {
     @StateObject private var dataService = XRPLDataService()
     @State private var data: XRPLData?
     @State private var lastRefresh = Date()
+    @State private var displayMode: DisplayMode = .resultCodes
+    @State private var showFilters = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 HStack {
-                    Text("Result Codes")
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                    DisclosureGroup("Filters", isExpanded: $showFilters) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Network")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Picker("", selection: $dataService.selectedNetwork) {
+                                ForEach(XRPLNetwork.allCases, id: \.self) { network in
+                                    Text(network.shortName)
+                                        .tag(network)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .disabled(dataService.isLoading)
+                            .onChange(of: dataService.selectedNetwork) { oldValue, newValue in
+                                if oldValue != newValue {
+                                    // Update display with cached data immediately
+                                    updateDisplayData()
+
+                                    // Refresh if no cached data exists for the new network
+                                    if dataService.getCurrentData() == nil {
+                                        Task {
+                                            await refreshData()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text("View")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Picker("", selection: $displayMode) {
+                                ForEach(DisplayMode.allCases, id: \.self) { mode in
+                                    Text(mode.rawValue)
+                                        .tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+
+                            Text("Data")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Picker("", selection: $dataService.dataMode) {
+                                ForEach(DataMode.allCases, id: \.self) { mode in
+                                    Text(mode.rawValue)
+                                        .tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .onChange(of: dataService.dataMode) { _, _ in
+                                dataService.startAutoRefresh()
+                                Task {
+                                    await refreshData()
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
                     Spacer()
                     Button(action: {
                         Task {
@@ -436,35 +639,6 @@ struct ContentView: View {
                     .controlSize(.small)
                     .disabled(dataService.isLoading)
                 }
-                
-                // Network toggle
-                HStack {
-                    Text("Network:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Picker("Network", selection: $dataService.selectedNetwork) {
-                        ForEach(XRPLNetwork.allCases, id: \.self) { network in
-                            Text(network.shortName)
-                                .tag(network)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(dataService.isLoading)
-                    .onChange(of: dataService.selectedNetwork) { oldValue, newValue in
-                        if oldValue != newValue {
-                            // Update display with cached data immediately
-                            updateDisplayData()
-                            
-                            // Refresh if no cached data exists for the new network
-                            if dataService.getCurrentData() == nil {
-                                Task {
-                                    await refreshData()
-                                }
-                            }
-                        }
-                    }
-                }
             }
             
             // Error message
@@ -482,6 +656,9 @@ struct ContentView: View {
             }
             
             if let data = data {
+                let entries = displayMode == .resultCodes ? data.resultCodes : data.transactionTypes
+                let mostCommon = displayMode == .resultCodes ? data.mostCommonResultCode : data.mostCommonTransactionType
+                let average = displayMode == .resultCodes ? data.averageResultCodes : data.averageTransactionTypes
                 // Statistics
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -489,7 +666,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        if let mostCommon = data.mostCommon {
+                        if let mostCommon = mostCommon {
                             Text("Top: \(mostCommon)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -501,16 +678,22 @@ struct ContentView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("Ledgers: \(data.ledgerRange)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        if dataService.dataMode == .live {
+                            Text("Ledger: \(data.latestLedger)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Ledgers: \(data.ledgerRange)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 
                 Divider()
                 
-                // Result codes list
-                if data.resultCodes.isEmpty {
+                // List
+                if entries.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "tray")
                             .font(.title2)
@@ -523,7 +706,7 @@ struct ContentView: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(data.resultCodes.enumerated()), id: \.offset) { index, resultCode in
+                            ForEach(Array(entries.enumerated()), id: \.offset) { index, resultCode in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(resultCode.type)
@@ -566,8 +749,8 @@ struct ContentView: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     Spacer()
-                    if data.averagePerType > 0 {
-                        Text("Avg: \(String(format: "%.1f", data.averagePerType))")
+                    if average > 0 {
+                        Text("Avg: \(String(format: "%.1f", average))")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -577,7 +760,7 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
-                    Text("Fetching \(dataService.selectedNetwork.shortName) data...")
+                    Text("Fetching \(dataService.selectedNetwork.shortName) \(dataService.dataMode.rawValue.lowercased()) data...")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text("Connecting to \(dataService.selectedNetwork.rawValue)")
