@@ -124,7 +124,7 @@ Build and package your own distribution:
 ## 🌐 XRPL Network
 
 The app connects directly to:
-- **Primary:** `wss://xrpl1.panicbot.app`
+- **Primary:** XRPL and Xahau nodes run by three-dev
 - **Fallback:** Can be configured in source code
 - **Data source:** Last 50 ledgers (configurable)
 - **Update frequency:** Every 5 minutes
