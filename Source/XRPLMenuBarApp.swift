@@ -225,6 +225,7 @@ class XRPLDataService: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var selectedNetwork: XRPLNetwork = .xrpl
+    @Published var lastDataUpdate = Date() // Trigger UI updates
     private let ledgerCount = 100 // Reduced for faster loading
     
     // Cache data for both networks
@@ -271,6 +272,8 @@ class XRPLDataService: ObservableObject {
             cachedData[.xahau] = xahauData
         }
         
+        // Trigger UI update
+        lastDataUpdate = Date()
         isLoading = false
         return cachedData[selectedNetwork]
     }
@@ -613,6 +616,10 @@ struct ContentView: View {
             
             // Start auto-refresh timer
             dataService.startAutoRefresh()
+        }
+        .onChange(of: dataService.lastDataUpdate) { _, _ in
+            // Update display when background refresh completes
+            updateDisplayData()
         }
     }
     
