@@ -58,13 +58,36 @@ struct XRPLData: Codable {
     let mostCommon: String?
     let averagePerType: Double
     let ledgerRange: String
+    let networkName: String
+}
+
+enum XRPLNetwork: String, CaseIterable {
+    case xrpl = "XRPL Mainnet"
+    case xahau = "Xahau Network"
+    
+    var wsURL: String {
+        switch self {
+        case .xrpl:
+            return "wss://xrpl1.panicbot.app"
+        case .xahau:
+            return "wss://xahau2.panicbot.app"
+        }
+    }
+    
+    var shortName: String {
+        switch self {
+        case .xrpl:
+            return "XRPL"
+        case .xahau:
+            return "Xahau"
+        }
+    }
 }
 
 // XRPL WebSocket client
 class XRPLClient: NSObject, ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession!
-    let wsURL = "wss://xrpl1.panicbot.app"
     private var isConnected = false
     private var requestId = 0
     private var pendingRequests: [Int: (Result<[String: Any], Error>) -> Void] = [:]
@@ -74,8 +97,8 @@ class XRPLClient: NSObject, ObservableObject {
         urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
     }
     
-    func connect() async throws {
-        guard let url = URL(string: wsURL) else {
+    func connect(to network: XRPLNetwork) async throws {
+        guard let url = URL(string: network.wsURL) else {
             throw XRPLError.invalidURL
         }
         
@@ -201,6 +224,7 @@ enum XRPLError: Error, LocalizedError {
 class XRPLDataService: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
+    @Published var selectedNetwork: XRPLNetwork = .xrpl
     let client = XRPLClient()
     private let ledgerCount = 50 // Reduced for faster loading
     
@@ -209,7 +233,7 @@ class XRPLDataService: ObservableObject {
         error = nil
         
         do {
-            try await client.connect()
+            try await client.connect(to: selectedNetwork)
             defer { client.disconnect() }
             
             // Get latest ledger
@@ -314,7 +338,8 @@ class XRPLDataService: ObservableObject {
             lastUpdated: ISO8601DateFormatter().string(from: Date()),
             mostCommon: mostCommon,
             averagePerType: averagePerType,
-            ledgerRange: ledgerRange
+            ledgerRange: ledgerRange,
+            networkName: selectedNetwork.rawValue
         )
     }
 }
@@ -327,32 +352,57 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
-            HStack {
-                Text("XRPL Result Codes")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                Spacer()
-                Button(action: {
-                    Task {
-                        await refreshData()
-                    }
-                }) {
-                    HStack(spacing: 4) {
-                        if dataService.isLoading {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Result Codes")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button(action: {
+                        Task {
+                            await refreshData()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            if dataService.isLoading {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                            }
+                            Text("Refresh")
                                 .font(.caption)
                         }
-                        Text("Refresh")
-                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(dataService.isLoading)
+                }
+                
+                // Network toggle
+                HStack {
+                    Text("Network:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Picker("Network", selection: $dataService.selectedNetwork) {
+                        ForEach(XRPLNetwork.allCases, id: \.self) { network in
+                            Text(network.shortName)
+                                .tag(network)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(dataService.isLoading)
+                    .onChange(of: dataService.selectedNetwork) { oldValue, newValue in
+                        if oldValue != newValue {
+                            Task {
+                                await refreshData()
+                            }
+                        }
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(dataService.isLoading)
             }
             
             // Error message
@@ -384,9 +434,15 @@ struct ContentView: View {
                         }
                     }
                     
-                    Text("Ledgers: \(data.ledgerRange)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    HStack {
+                        Text("Network: \(data.networkName)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("Ledgers: \(data.ledgerRange)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Divider()
@@ -459,10 +515,10 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
-                    Text("Fetching XRPL data...")
+                    Text("Fetching \(dataService.selectedNetwork.shortName) data...")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Connecting to XRPL node")
+                    Text("Connecting to \(dataService.selectedNetwork.rawValue)")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -474,7 +530,7 @@ struct ContentView: View {
                     Image(systemName: "network")
                         .font(.title2)
                         .foregroundColor(.secondary)
-                    Text("Ready to fetch XRPL data")
+                    Text("Ready to fetch \(dataService.selectedNetwork.shortName) data")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Button("Start Loading") {
